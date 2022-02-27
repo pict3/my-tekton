@@ -1,0 +1,54 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: build-docker-image-from-git
+spec:
+  params:
+    - name: pathToDockerFile
+      type: string
+      description: The path to the dockerfile to build
+      default: $(resources.inputs.docker-source.path)/Dockerfile
+    - name: pathToContext
+      type: string
+      description: |
+        The build context used by Kaniko
+        (https://github.com/GoogleContainerTools/kaniko#kaniko-build-contexts)
+      default: $(resources.inputs.docker-source.path)
+  resources:
+    inputs:
+      - name: docker-source
+        type: git
+    outputs:
+      - name: builtImage
+        type: image
+  results:
+    - name: manifest-tag
+      description: The tag value of manufest.
+  steps:
+    - name: get-tag
+      image: mikefarah/yq:4.20.2
+      script: |
+        yq ".spec.template.spec.containers[0].image" $(params.pathToContext)/k8s_manifest/deploy.yaml | \
+        awk -F':' '{print $2}' | \
+        tee $(results.manifest-tag.path)
+    - name: build-and-push
+#      image: gcr.io/kaniko-project/executor:latest  # for command -> script
+      image: gcr.io/kaniko-project/executor:debug
+      # specifying DOCKER_CONFIG is required to allow kaniko to detect docker credential
+      env:
+        - name: "DOCKER_CONFIG"
+          value: "/tekton/home/.docker/"
+        - name: "IMAGE_DESTINATION"
+          value: $(resources.outputs.builtImage.url)
+      script: |
+        #!/busybox/sh
+        set -xe
+        IMAGE_TAG=`cat $(results.manifest-tag.path)`
+        echo "0: "$IMAGE_TAG
+        echo "1: "$IMAGE_DESTINATION
+        IMAGE_DESTINATION="${IMAGE_DESTINATION}:${IMAGE_TAG}"
+        echo "2: "$IMAGE_DESTINATION
+        /kaniko/executor --dockerfile=$(params.pathToDockerFile) \
+        --destination=$IMAGE_DESTINATION \
+        --context=$(params.pathToContext) \
+        --build-arg=BASE=alpine:3

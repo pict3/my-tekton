@@ -1,0 +1,15 @@
+apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  name: pipeline-build-deploy-run
+spec:
+  serviceAccountName: docker-registry-sa
+  pipelineRef:
+    name: pipeline-build-deploy
+  resources:
+    - name: docker-source
+      resourceRef:
+        name: git-resource
+    - name: builtImage
+      resourceRef:
+        name: image-resource
